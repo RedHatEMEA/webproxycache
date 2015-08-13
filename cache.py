@@ -1,7 +1,9 @@
 #!/usr/bin/python
 
+import copy
 import errno
 import os
+import re
 import rfc822
 import socket
 import ssl
@@ -115,31 +117,53 @@ class Request(IO):
         return "cache/%s:%u" % self.netloc() + self.path()
 
 
+class FakeRequest(Request):
+    def __init__(self, _req, _url):
+        (self.verb, self.http) = (_req.verb, _req.http)
+        self.url = urlparse.urlparse(_url)
+        self.headers = copy.copy(_req.headers)
+        self.headers["Host"] = self.url.netloc
+        del self.headers["Authorization"]
+
+
 class UncachedResponse(IO):
     def __init__(self, _req):
         self.req = _req
+        self.make_request(self.req)
 
+        if self.req.verb == "GET" and (re.match("^https://registry-1.docker.io:443/v2/[^/]+/[^/]+/blobs/sha256:[0-9a-z]{64}$", urlparse.urlunparse(self.req.url)) or
+                                       re.match("^https://registry.access.redhat.com:443/v1/images/[0-9a-z]{64}/(ancestry|json|layer)$", urlparse.urlunparse(self.req.url))):
+            (self.http, self.code, self.other) = self.readline().split(" ", 2)
+            self.code = int(self.code)
+            self.headers = rfc822.Message(self.f, False)
+
+            self.f.close()
+            self.s.close()
+
+            self.make_request(FakeRequest(self.req, self.headers["Location"]))
+
+    def make_request(self, req):
         self.s = socket.socket()
-        self.s.connect(self.req.netloc())
-        if self.req.url.scheme == "https":
+        self.s.connect(req.netloc())
+        if req.url.scheme == "https":
             self.s = ssl.wrap_socket(self.s, cert_reqs=ssl.CERT_REQUIRED,
                                      ca_certs="/etc/pki/tls/certs/ca-bundle.crt")
-            ssl.match_hostname(self.s.getpeercert(), self.req.netloc()[0])
+            ssl.match_hostname(self.s.getpeercert(), req.netloc()[0])
         self.f = self.s.makefile()
 
-        self.write("%s %s %s\r\n" % (self.req.verb, self.req.path(),
-                                     self.req.http))
-        self.write(self.req.headers)
+        self.write("%s %s %s\r\n" % (req.verb, req.path(), req.http))
+        self.write(req.headers)
         self.write("\r\n")
 
-        self.req.copybody(self)
+        req.copybody(self)
 
         self.flush()
 
     def cacheable(self):
         return self.req.verb == "GET" and self.code == 200 and \
             "Range" not in self.req.headers and \
-            "Content-Range" not in self.headers
+            "Content-Range" not in self.headers and \
+            not self.req.netloc() == ("auth.docker.io", 443)
 
     def serve(self):
         (self.http, self.code, self.other) = self.readline().split(" ", 2)
@@ -151,10 +175,16 @@ class UncachedResponse(IO):
         self.req.write("\r\n")
 
         if self.cacheable():
+            with certlock:
+                print >>sys.stderr, "SAVE " + urlparse.urlunparse(self.req.url)
+
             cw = CacheWriter(self.req.cache_filename())
             self.copybody(self.req, cw)
             cw.persist()
         else:
+            with certlock:
+                print >>sys.stderr, "MISS " + urlparse.urlunparse(self.req.url)
+
             self.copybody(self.req)
 
         self.req.flush()
@@ -196,6 +226,9 @@ class CachedResponse(IO):
             raise NotInCacheException()
 
     def serve(self):
+        with certlock:
+            print >>sys.stderr, "HIT  " + urlparse.urlunparse(self.req.url)
+
         self.req.write("HTTP/1.1 200 OK\r\n")
 
         st = os.fstat(self.f.fileno())
