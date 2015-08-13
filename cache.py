@@ -122,7 +122,9 @@ class UncachedResponse(IO):
         self.s = socket.socket()
         self.s.connect(self.req.netloc())
         if self.req.url.scheme == "https":
-            self.s = ssl.wrap_socket(self.s, server_hostname=self.req.netloc())
+            self.s = ssl.wrap_socket(self.s, cert_reqs=ssl.CERT_REQUIRED,
+                                     ca_certs="/etc/pki/tls/certs/ca-bundle.crt")
+            ssl.match_hostname(self.s.getpeercert(), self.req.netloc()[0])
         self.f = self.s.makefile()
 
         self.write("%s %s %s\r\n" % (self.req.verb, self.req.path(),
