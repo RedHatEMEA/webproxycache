@@ -1,0 +1,8 @@
+[Unit]
+
+[Service]
+ExecStart=/usr/local/webproxycache/cache.py
+WorkingDirectory=/var/cache/webproxycache
+
+[Install]
+WantedBy=multi-user.target
