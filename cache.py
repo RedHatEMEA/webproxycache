@@ -148,7 +148,11 @@ class UncachedResponse(IO):
         if req.url.scheme == "https":
             self.s = ssl.wrap_socket(self.s, cert_reqs=ssl.CERT_REQUIRED,
                                      ca_certs="/etc/pki/tls/certs/ca-bundle.crt")
-            ssl.match_hostname(self.s.getpeercert(), req.netloc()[0])
+            try:
+                ssl.match_hostname(self.s.getpeercert(), req.netloc()[0])
+            except AttributeError:
+                pass
+
         self.f = self.s.makefile()
 
         self.write("%s %s %s\r\n" % (req.verb, req.path(), req.http))
