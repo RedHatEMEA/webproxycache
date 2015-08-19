@@ -132,7 +132,8 @@ class UncachedResponse(IO):
         self.make_request(self.req)
 
         if self.req.verb == "GET" and (re.match("^https://registry-1.docker.io:443/v2/[^/]+/[^/]+/blobs/sha256:[0-9a-z]{64}$", urlparse.urlunparse(self.req.url)) or
-                                       re.match("^https://registry.access.redhat.com:443/v1/images/[0-9a-z]{64}/(ancestry|json|layer)$", urlparse.urlunparse(self.req.url))):
+                                       re.match("^https://registry.access.redhat.com:443/v1/images/[0-9a-z]{64}/(ancestry|json|layer)$", urlparse.urlunparse(self.req.url)) or
+                                       re.match("^https://github.com:443/[^/]+/[^/]+/archive/", urlparse.urlunparse(self.req.url))):
             (self.http, self.code, self.other) = self.readline().split(" ", 2)
             self.code = int(self.code)
             self.headers = rfc822.Message(self.f, False)
