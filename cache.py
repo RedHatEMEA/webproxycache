@@ -6,13 +6,14 @@ import os
 import re
 import rfc822
 import socket
+import SocketServer
 import ssl
 import sslca
 import sys
 import tempfile
 import threading
 import urlparse
-import SocketServer
+import zlib
 
 
 certlock = threading.Lock()
@@ -46,6 +47,9 @@ class IO(object):
         self.f.flush()
 
     def copyall(self, dst, extra=None):
+        if self.headers.get("Content-Encoding", "") == "gzip":
+            d = zlib.decompressobj(31)
+
         while True:
             data = self.read(4096)
             if data == "":
@@ -53,9 +57,15 @@ class IO(object):
 
             dst.write(data)
             if extra:
-                extra.write(data)
+                if self.headers.get("Content-Encoding", "") == "gzip":
+                    extra.write(d.decompress(data))
+                else:
+                    extra.write(data)
 
     def copylength(self, dst, n, extra=None):
+        if self.headers.get("Content-Encoding", "") == "gzip":
+            d = zlib.decompressobj(31)
+
         while n > 0:
             data = self.read(min(n, 4096))
             if data == "":
@@ -63,7 +73,10 @@ class IO(object):
 
             dst.write(data)
             if extra:
-                extra.write(data)
+                if self.headers.get("Content-Encoding", "") == "gzip":
+                    extra.write(d.decompress(data))
+                else:
+                    extra.write(data)
 
             n -= len(data)
 
@@ -180,6 +193,7 @@ class UncachedResponse(IO):
         return self.req.verb == "GET" and self.code == 200 and \
             "Range" not in self.req.headers and \
             "Content-Range" not in self.headers and \
+            self.headers.get("Content-Encoding", "") in ["", "gzip"] and \
             not self.req.netloc() == ("auth.docker.io", 443)
 
     def serve(self):
@@ -233,6 +247,7 @@ class CacheWriter(IO):
 class CachedResponse(IO):
     def __init__(self, _req):
         self.req = _req
+        self.headers = {}
 
         if self.req.verb != "GET" or self.req.headers.get("Range"):
             raise NotInCacheException()
