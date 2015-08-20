@@ -62,8 +62,8 @@ class IO(object):
                 else:
                     extra.write(data)
 
-    def copylength(self, dst, n, extra=None):
-        if self.headers.get("Content-Encoding", "") == "gzip":
+    def copylength(self, dst, n, extra=None, d=None):
+        if self.headers.get("Content-Encoding", "") == "gzip" and d is None:
             d = zlib.decompressobj(31)
 
         while n > 0:
@@ -81,11 +81,15 @@ class IO(object):
             n -= len(data)
 
     def copychunked(self, dst, extra=None):
+        d = None
+        if self.headers.get("Content-Encoding", "") == "gzip":
+            d = zlib.decompressobj(31)
+
         while True:
             n = int(self.readline(), 16)
             dst.write("%x\r\n" % n)
 
-            self.copylength(dst, n, extra)
+            self.copylength(dst, n, extra, d)
 
             if self.read(2) != "\r\n":
                 raise EOFException()
@@ -139,7 +143,11 @@ class Request(IO):
             raise Exception()
 
     def cache_filename(self):
-        return "cache/%s:%u" % self.netloc() + self.path()
+        fn = "cache/%s:%u" % self.netloc() + self.path()
+        if fn[-1] != "/":
+            fn += "-"
+        fn += "__file__"
+        return fn
 
 
 class FakeRequest(Request):
@@ -158,7 +166,8 @@ class UncachedResponse(IO):
 
         if self.req.verb == "GET" and (re.match("^https://registry-1.docker.io:443/v2/[^/]+/[^/]+/blobs/sha256:[0-9a-z]{64}$", urlparse.urlunparse(self.req.url)) or
                                        re.match("^https://registry.access.redhat.com:443/v1/images/[0-9a-z]{64}/(ancestry|json|layer)$", urlparse.urlunparse(self.req.url)) or
-                                       re.match("^https://github.com:443/[^/]+/[^/]+/archive/", urlparse.urlunparse(self.req.url))):
+                                       re.match("^https://github.com:443/[^/]+/[^/]+/archive/", urlparse.urlunparse(self.req.url)) or
+                                       re.match("^https://rubygems.org:443/gems/", urlparse.urlunparse(self.req.url))):
             (self.http, self.code, self.other) = self.readline().split(" ", 2)
             self.code = int(self.code)
             self.headers = rfc822.Message(self.f, False)
@@ -185,7 +194,8 @@ class UncachedResponse(IO):
         self.write(req.headers)
         self.write("\r\n")
 
-        req.copybody(self)
+        if req.verb != "GET":
+            req.copybody(self)
 
         self.flush()
 
@@ -265,6 +275,8 @@ class CachedResponse(IO):
 
         st = os.fstat(self.f.fileno())
         self.req.write("Content-Length: %u\r\n" % st.st_size)
+        if re.match("^https://pypi.python.org:443/", urlparse.urlunparse(self.req.url)):
+            self.req.write("Content-Type: text/html; charset=utf-8\r\n")
         self.req.write("Connection: close\r\n")
         self.req.write("\r\n")
         self.copylength(self.req, st.st_size)
