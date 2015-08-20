@@ -45,6 +45,16 @@ class IO(object):
     def flush(self):
         self.f.flush()
 
+    def copyall(self, dst, extra=None):
+        while True:
+            data = self.read(4096)
+            if data == "":
+                break
+
+            dst.write(data)
+            if extra:
+                extra.write(data)
+
     def copylength(self, dst, n, extra=None):
         while n > 0:
             data = self.read(min(n, 4096))
@@ -73,12 +83,14 @@ class IO(object):
                 break
 
     def copybody(self, dst, extra=None):
-        l = int(self.headers.get("Content-Length", "0"))
-        if l:
-            self.copylength(dst, l, extra)
+        if "Content-Length" in self.headers:
+            self.copylength(dst, int(self.headers["Content-Length"]), extra)
 
         elif self.headers.get("Transfer-Encoding", "").lower() == "chunked":
             self.copychunked(dst, extra)
+
+        else:
+            self.copyall(dst, extra)
 
 
 class Request(IO):
