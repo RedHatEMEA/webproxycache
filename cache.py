@@ -382,11 +382,11 @@ class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
 
 def make_server(ip="0.0.0.0", port="8080"):
+    database.DB().create()
     return ThreadedTCPServer((ip, int(port)), ThreadedTCPRequestHandler)
 
 
 if __name__ == "__main__":
-    database.DB().create()
     server = make_server(*sys.argv[1:])
     print >>sys.stderr, "Listening on %s:%s..." % server.server_address
     server.serve_forever()
