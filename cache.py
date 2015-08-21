@@ -152,31 +152,54 @@ class Request(IO):
             raise Exception()
 
 
+class FakeRequest(Request):
+    def __init__(self, _req, _url):
+        (self.verb, self.http) = (_req.verb, _req.http)
+        self.url = urlparse.urlparse(_url)
+        self.headers = copy.copy(_req.headers)
+        self.headers["Host"] = self.url.netloc
+        del self.headers["Authorization"]
+
+
 class UncachedResponse(IO):
     def __init__(self, _req):
         super(UncachedResponse, self).__init__(None)
 
         self.req = _req
+        self.make_request(self.req)
 
+        if self.req.verb == "GET" and (re.match("^https://registry-1.docker.io:443/v2/[^/]+/[^/]+/blobs/sha256:[0-9a-z]{64}$", urlparse.urlunparse(self.req.url)) or
+                                       re.match("^https://registry.access.redhat.com:443/v1/images/[0-9a-z]{64}/(ancestry|json|layer)$", urlparse.urlunparse(self.req.url)) or
+                                       re.match("^https://github.com:443/[^/]+/[^/]+/archive/", urlparse.urlunparse(self.req.url)) or
+                                       re.match("^https://rubygems.org:443/gems/", urlparse.urlunparse(self.req.url))):
+            (self.http, self.code, self.other) = self.readline().split(" ", 2)
+            self.code = int(self.code)
+            self.headers = rfc822.Message(self.f, False)
+
+            self.f.close()
+            self.s.close()
+
+            self.make_request(FakeRequest(self.req, self.headers["Location"]))
+
+    def make_request(self, req):
         self.s = socket.socket()
-        self.s.connect(self.req.netloc())
-        if self.req.url.scheme == "https":
+        self.s.connect(req.netloc())
+        if req.url.scheme == "https":
             self.s = ssl.wrap_socket(self.s, cert_reqs=ssl.CERT_REQUIRED,
                                      ca_certs="/etc/pki/tls/certs/ca-bundle.crt")
             try:
-                ssl.match_hostname(self.s.getpeercert(), self.req.netloc()[0])
+                ssl.match_hostname(self.s.getpeercert(), req.netloc()[0])
             except AttributeError:
                 pass
 
         self.f = self.s.makefile()
 
-        self.write("%s %s %s\r\n" % (self.req.verb, self.req.path(),
-                                     self.req.http))
-        self.write(self.req.headers)
+        self.write("%s %s %s\r\n" % (req.verb, req.path(), req.http))
+        self.write(req.headers)
         self.write("\r\n")
 
-        if self.req.verb != "GET":
-            self.req.copybody(self)
+        if req.verb != "GET":
+            req.copybody(self)
 
         self.flush()
 
