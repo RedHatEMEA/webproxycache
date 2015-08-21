@@ -1,7 +1,9 @@
 #!/usr/bin/python
 
 import copy
+import database
 import errno
+import httplib
 import os
 import re
 import rfc822
@@ -12,11 +14,13 @@ import sslca
 import sys
 import tempfile
 import threading
+import urllib
 import urlparse
 import zlib
 
 
 certlock = threading.Lock()
+tls = threading.local()
 
 
 class EOFException(Exception):
@@ -30,6 +34,11 @@ class NotInCacheException(Exception):
 class IO(object):
     def __init__(self, _f):
         self.f = _f
+        self.headers = {}
+
+    def log(self, mode, code, line):
+        with certlock:
+            print >>sys.stderr, "%-4s(%u) %s" % (mode, code, line)
 
     def readline(self):
         l = self.f.readline()
@@ -112,7 +121,7 @@ class IO(object):
 
 class Request(IO):
     def __init__(self, _f, netloc=None):
-        self.f = _f
+        super(Request, self).__init__(_f)
 
         (self.verb, self.url, self.http) = self.readline().split(" ", 2)
 
@@ -142,65 +151,37 @@ class Request(IO):
         else:
             raise Exception()
 
-    def cache_filename(self):
-        fn = "cache/%s:%u" % self.netloc() + self.path()
-        if fn[-1] != "/":
-            fn += "-"
-        fn += "__file__"
-        return fn
-
-
-class FakeRequest(Request):
-    def __init__(self, _req, _url):
-        (self.verb, self.http) = (_req.verb, _req.http)
-        self.url = urlparse.urlparse(_url)
-        self.headers = copy.copy(_req.headers)
-        self.headers["Host"] = self.url.netloc
-        del self.headers["Authorization"]
-
 
 class UncachedResponse(IO):
     def __init__(self, _req):
+        super(UncachedResponse, self).__init__(None)
+
         self.req = _req
-        self.make_request(self.req)
 
-        if self.req.verb == "GET" and (re.match("^https://registry-1.docker.io:443/v2/[^/]+/[^/]+/blobs/sha256:[0-9a-z]{64}$", urlparse.urlunparse(self.req.url)) or
-                                       re.match("^https://registry.access.redhat.com:443/v1/images/[0-9a-z]{64}/(ancestry|json|layer)$", urlparse.urlunparse(self.req.url)) or
-                                       re.match("^https://github.com:443/[^/]+/[^/]+/archive/", urlparse.urlunparse(self.req.url)) or
-                                       re.match("^https://rubygems.org:443/gems/", urlparse.urlunparse(self.req.url))):
-            (self.http, self.code, self.other) = self.readline().split(" ", 2)
-            self.code = int(self.code)
-            self.headers = rfc822.Message(self.f, False)
-
-            self.f.close()
-            self.s.close()
-
-            self.make_request(FakeRequest(self.req, self.headers["Location"]))
-
-    def make_request(self, req):
         self.s = socket.socket()
-        self.s.connect(req.netloc())
-        if req.url.scheme == "https":
+        self.s.connect(self.req.netloc())
+        if self.req.url.scheme == "https":
             self.s = ssl.wrap_socket(self.s, cert_reqs=ssl.CERT_REQUIRED,
                                      ca_certs="/etc/pki/tls/certs/ca-bundle.crt")
             try:
-                ssl.match_hostname(self.s.getpeercert(), req.netloc()[0])
+                ssl.match_hostname(self.s.getpeercert(), self.req.netloc()[0])
             except AttributeError:
                 pass
 
         self.f = self.s.makefile()
 
-        self.write("%s %s %s\r\n" % (req.verb, req.path(), req.http))
-        self.write(req.headers)
+        self.write("%s %s %s\r\n" % (self.req.verb, self.req.path(),
+                                     self.req.http))
+        self.write(self.req.headers)
         self.write("\r\n")
 
-        if req.verb != "GET":
-            req.copybody(self)
+        if self.req.verb != "GET":
+            self.req.copybody(self)
 
         self.flush()
 
     def cacheable(self):
-        return self.req.verb == "GET" and self.code == 200 and \
+        return self.req.verb == "GET" and \
             "Range" not in self.req.headers and \
             "Content-Range" not in self.headers and \
             self.headers.get("Content-Encoding", "") in ["", "gzip"] and \
@@ -210,21 +191,29 @@ class UncachedResponse(IO):
         (self.http, self.code, self.other) = self.readline().split(" ", 2)
         self.code = int(self.code)
         self.headers = rfc822.Message(self.f, False)
+        del self.headers["Connection"]
 
         self.req.write("%s %u %s\r\n" % (self.http, self.code, self.other))
         self.req.write(self.headers)
+        self.req.write("Connection: close\r\n")
         self.req.write("\r\n")
 
-        if self.cacheable():
-            with certlock:
-                print >>sys.stderr, "SAVE " + urlparse.urlunparse(self.req.url)
+        if self.cacheable() and self.code == 200:
+            self.log("SAVE", self.code, urlparse.urlunparse(self.req.url))
 
-            cw = CacheWriter(self.req.cache_filename())
+            cw = CacheWriter(self.req, self)
             self.copybody(self.req, cw)
             cw.persist()
+
+        elif self.cacheable() and self.code in [301, 302, 404]:
+            self.log("SAVE", self.code, urlparse.urlunparse(self.req.url))
+
+            cw = CacheWriter(self.req, self)
+            self.copybody(self.req)
+            cw.persist()
+
         else:
-            with certlock:
-                print >>sys.stderr, "MISS " + urlparse.urlunparse(self.req.url)
+            self.log("MISS", self.code, urlparse.urlunparse(self.req.url))
 
             self.copybody(self.req)
 
@@ -234,58 +223,83 @@ class UncachedResponse(IO):
 
 
 class CacheWriter(IO):
-    def __init__(self, _filename):
-        self.filename = _filename
-        self.f = tempfile.NamedTemporaryFile(dir="cache")
+    def __init__(self, _req, _resp):
+        super(CacheWriter, self).__init__(tempfile.NamedTemporaryFile())
+
+        (self.req, self.resp) = (_req, _resp)
 
     def persist(self):
-        os.chmod(self.f.name, 0644)
+        if self.resp.code == 200:
+            hl = ["Content-Type"]
+        elif self.resp.code in [301, 302]:
+            hl = ["Location"]
+        else:
+            hl = []
 
-        try:
-            os.makedirs(os.path.dirname(self.filename))
-        except OSError:
-            pass
+        extraheaders = []
+        for k in hl:
+            v = self.resp.headers.get(k, None)
+            if v:
+                extraheaders.append("%s: %s" % (k, v))
+        extraheaders = "\r\n".join(extraheaders)
 
-        try:
-            os.link(self.f.name, self.filename)
-        except OSError:
-            pass
-
+        tls.db.persist(urlparse.urlunparse(self.req.url), self.resp.code,
+                       extraheaders, self.f)
         self.f.close()
 
 
 class CachedResponse(IO):
     def __init__(self, _req):
+        super(CachedResponse, self).__init__(None)
+
         self.req = _req
-        self.headers = {}
 
         if self.req.verb != "GET" or self.req.headers.get("Range"):
             raise NotInCacheException()
 
-        try:
-            self.f = open(self.req.cache_filename(), "r")
-        except IOError:
+        rv = tls.db.serve(urlparse.urlunparse(self.req.url))
+        if rv is None:
             raise NotInCacheException()
 
+        (self.code, self.extraheaders, self.f, self.length) = rv
+
     def serve(self):
-        with certlock:
-            print >>sys.stderr, "HIT  " + urlparse.urlunparse(self.req.url)
+        self.log("HIT", self.code, urlparse.urlunparse(self.req.url))
 
-        self.req.write("HTTP/1.1 200 OK\r\n")
+        self.req.write("HTTP/1.1 %u %s\r\n" %
+                       (self.code, httplib.responses[self.code]))
 
-        st = os.fstat(self.f.fileno())
-        self.req.write("Content-Length: %u\r\n" % st.st_size)
-        if re.match("^https://pypi.python.org:443/", urlparse.urlunparse(self.req.url)):
-            self.req.write("Content-Type: text/html; charset=utf-8\r\n")
+        self.req.write("Content-Length: %u\r\n" % self.length)
+        if self.extraheaders:
+            self.req.write(self.extraheaders + "\r\n")
         self.req.write("Connection: close\r\n")
         self.req.write("\r\n")
-        self.copylength(self.req, st.st_size)
+        self.copylength(self.req, self.length)
+
+        self.req.flush()
+
+
+class LocalResponse(IO):
+    def __init__(self, _req, fn):
+        super(LocalResponse, self).__init__(open(fn))
+
+        self.req = _req
+
+    def serve(self):
+        self.log("HIT", 200, urlparse.urlunparse(self.req.url))
+
+        self.req.write("HTTP/1.1 200 OK\r\n")
+        self.req.write("Connection: close\r\n")
+        self.req.write("\r\n")
+        self.copyall(self.req)
 
         self.req.flush()
 
 
 class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
     def handle(self, netloc=None):
+        tls.db = database.DB()
+
         try:
             self._handle(netloc)
         except EOFException:
@@ -318,14 +332,21 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
 
             return self.handle(req.netloc())
 
+        if req.verb == "GET" and req.netloc() == ("rubygems.org", 443) and re.match(r"^/api/v1/dependencies\?", req.path()):
+            url = list(req.url)
+            qs = urlparse.parse_qs(url[4])
+            qs["gems"] = ",".join(sorted(qs["gems"][0].split(",")))
+            url[4] = urllib.urlencode(qs)
+            req.url = urlparse.ParseResult(*url)
+
         if req.verb == "GET" and req.netloc() == ("cacert", 80):
-            req.cache_filename = lambda: "certs/ca.crt"
+            resp = LocalResponse(req, "certs/ca.crt")
+        else:
+            try:
+                resp = CachedResponse(req)
 
-        try:
-            resp = CachedResponse(req)
-
-        except NotInCacheException:
-            resp = UncachedResponse(req)
+            except NotInCacheException:
+                resp = UncachedResponse(req)
 
         resp.serve()
 
@@ -341,12 +362,8 @@ def make_server(ip="0.0.0.0", port="8080"):
     return ThreadedTCPServer((ip, int(port)), ThreadedTCPRequestHandler)
 
 
-try:
-    os.mkdir("cache")
-except OSError:
-    pass
-
 if __name__ == "__main__":
+    database.DB().create()
     server = make_server(*sys.argv[1:])
     print >>sys.stderr, "Listening on %s:%s..." % server.server_address
     server.serve_forever()
