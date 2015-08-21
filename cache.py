@@ -205,7 +205,7 @@ class UncachedResponse(IO):
             self.copybody(self.req, cw)
             cw.persist()
 
-        elif self.cacheable() and self.code in [301, 302, 404]:
+        elif self.cacheable() and self.code in [301, 302, 307, 404]:
             self.log("SAVE", self.code, urlparse.urlunparse(self.req.url))
 
             cw = CacheWriter(self.req, self)
@@ -231,7 +231,7 @@ class CacheWriter(IO):
     def persist(self):
         if self.resp.code == 200:
             hl = ["Content-Type"]
-        elif self.resp.code in [301, 302]:
+        elif self.resp.code in [301, 302, 307]:
             hl = ["Location"]
         else:
             hl = []
