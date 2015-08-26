@@ -198,7 +198,7 @@ class UncachedResponse(IO):
         self.write(req.headers)
         self.write("\r\n")
 
-        if req.verb != "GET":
+        if req.verb not in ["GET", "HEAD"]:
             req.copybody(self)
 
         self.flush()
