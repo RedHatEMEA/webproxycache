@@ -169,6 +169,7 @@ class UncachedResponse(IO):
         self.make_request(self.req)
 
         if self.req.verb == "GET" and (re.match("^https://registry-1.docker.io:443/v2/[^/]+/[^/]+/blobs/sha256:[0-9a-z]{64}$", urlparse.urlunparse(self.req.url)) or
+                                       re.match("^https://registry-1.docker.io:443/v1/images/[0-9a-z]{64}/layer$", urlparse.urlunparse(self.req.url)) or
                                        re.match("^https://registry.access.redhat.com:443/v1/images/[0-9a-z]{64}/(ancestry|json|layer)$", urlparse.urlunparse(self.req.url)) or
                                        re.match("^https://github.com:443/[^/]+/[^/]+/archive/", urlparse.urlunparse(self.req.url)) or
                                        re.match("^https://rubygems.org:443/gems/", urlparse.urlunparse(self.req.url))):
@@ -207,8 +208,7 @@ class UncachedResponse(IO):
         return self.req.verb == "GET" and \
             "Range" not in self.req.headers and \
             "Content-Range" not in self.headers and \
-            self.headers.get("Content-Encoding", "") in ["", "gzip"] and \
-            not self.req.netloc() == ("auth.docker.io", 443)
+            self.headers.get("Content-Encoding", "") in ["", "gzip"]
 
     def serve(self):
         (self.http, self.code, self.other) = self.readline().split(" ", 2)
@@ -228,7 +228,9 @@ class UncachedResponse(IO):
             self.copybody(self.req, cw)
             cw.persist()
 
-        elif self.cacheable() and self.code in [301, 302, 307, 404]:
+        elif self.cacheable() and \
+             (self.code in [301, 302, 307, 404] or \
+              self.code == 401 and self.req.netloc() == ("registry-1.docker.io", 443)):
             self.log("SAVE", self.code, urlparse.urlunparse(self.req.url))
 
             cw = CacheWriter(self.req, self)

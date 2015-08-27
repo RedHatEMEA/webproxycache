@@ -7,14 +7,15 @@ CREATE TABLE IF NOT EXISTS cache(
   url TEXT NOT NULL PRIMARY KEY,
   code INTEGER NOT NULL,
   headers TEXT,
-  content BLOB
+  content BLOB,
+  timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
 
 class DB(apsw.Connection):
     def __init__(self):
         super(DB, self).__init__("webproxycache.db")
-        self.setbusytimeout(1000)
+        self.setbusytimeout(10000)
 
     def create(self):
         c = self.cursor()
@@ -61,6 +62,9 @@ class DB(apsw.Connection):
             row = c.next()
         except StopIteration:
             return
-        
+
+        c.execute("UPDATE cache SET timestamp = DATETIME('NOW') "
+                  "WHERE url = ?", (url, ))
+
         blob = self.blobopen("main", "cache", "content", row[0], False)
         return (row[1], row[2], blob, row[3])
