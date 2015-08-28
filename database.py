@@ -16,6 +16,8 @@ class DB(apsw.Connection):
     def __init__(self):
         super(DB, self).__init__("webproxycache.db")
         self.setbusyhandler(lambda n: True)
+        c = self.cursor()
+        c.execute("PRAGMA journal_mode = WAL")
 
     def create(self):
         c = self.cursor()

@@ -215,10 +215,13 @@ class UncachedResponse(IO):
         self.code = int(self.code)
         self.headers = rfc822.Message(self.f, False)
         del self.headers["Connection"]
+        if int(self.headers.get("Content-Length", 0)) > 0 or self.headers.get("Transfer-Encoding", "").lower() == "chunked":
+            self.headers["Connection"] = "keep-alive"
+        else:
+            self.headers["Connection"] = "close"
 
         self.req.write("%s %u %s\r\n" % (self.http, self.code, self.other))
         self.req.write(self.headers)
-        self.req.write("Connection: close\r\n")
         self.req.write("\r\n")
 
         if self.cacheable() and self.code == 200:
@@ -243,6 +246,8 @@ class UncachedResponse(IO):
         self.req.flush()
         self.f.close()
         self.s.close()
+
+        return self.headers["Connection"] == "keep-alive"
 
 
 class CacheWriter(IO):
@@ -295,11 +300,13 @@ class CachedResponse(IO):
         self.req.write("Content-Length: %u\r\n" % self.length)
         if self.extraheaders:
             self.req.write(self.extraheaders + "\r\n")
-        self.req.write("Connection: close\r\n")
+        self.req.write("Connection: keep-alive\r\n")
         self.req.write("\r\n")
         self.copylength(self.req, self.length)
 
         self.req.flush()
+
+        return True
 
 
 class LocalResponse(IO):
@@ -317,6 +324,8 @@ class LocalResponse(IO):
         self.copyall(self.req)
 
         self.req.flush()
+
+        return False
 
 
 class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
@@ -337,7 +346,11 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
 
     def _handle(self, netloc=None):
         f = self.request.makefile()
+        while self.__handle(f, netloc):
+            pass
+        f.close()
 
+    def __handle(self, f, netloc):
         req = Request(f, netloc)
 
         if req.verb == "CONNECT" and netloc is None:
@@ -371,9 +384,7 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             except NotInCacheException:
                 resp = UncachedResponse(req)
 
-        resp.serve()
-
-        f.close()
+        return resp.serve()
 
 
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):

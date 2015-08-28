@@ -1,3 +1,4 @@
 /certs
 *.pyc
-*.db
+/*.db
+/*.db-*
