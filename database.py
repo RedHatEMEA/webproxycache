@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS cache(
 class DB(apsw.Connection):
     def __init__(self):
         super(DB, self).__init__("webproxycache.db")
-        self.setbusytimeout(10000)
+        self.setbusyhandler(lambda n: True)
 
     def create(self):
         c = self.cursor()
@@ -32,16 +32,16 @@ class DB(apsw.Connection):
         f.seek(0, 2)
         n = f.tell()
         f.seek(0)
-    
+
         c = self.cursor()
         c.execute("BEGIN")
         c.execute("INSERT INTO cache(url, code, headers, content) "
                   "VALUES(?, ?, ?, zeroblob(?))",
                   (url, code, headers, n))
-    
+
         blob = self.blobopen("main", "cache", "content",
                              self.last_insert_rowid(), True)
-        
+
         while n > 0:
             data = f.read(min(n, 4096))
             if data == "":

@@ -228,9 +228,7 @@ class UncachedResponse(IO):
             self.copybody(self.req, cw)
             cw.persist()
 
-        elif self.cacheable() and \
-             (self.code in [301, 302, 307, 404] or \
-              self.code == 401 and self.req.netloc() == ("registry-1.docker.io", 443)):
+        elif self.cacheable() and self.code in [301, 302, 307, 404]:
             self.log("SAVE", self.code, urlparse.urlunparse(self.req.url))
 
             cw = CacheWriter(self.req, self)
