@@ -7,7 +7,10 @@ CREATE TABLE IF NOT EXISTS cache(
   url TEXT NOT NULL PRIMARY KEY,
   code INTEGER NOT NULL,
   headers TEXT,
-  content BLOB,
+  content BLOB
+);
+CREATE TABLE IF NOT EXISTS cache2(
+  url TEXT NOT NULL PRIMARY KEY REFERENCES cache(url) ON DELETE CASCADE ON UPDATE CASCADE,
   timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -18,6 +21,7 @@ class DB(apsw.Connection):
         self.setbusyhandler(lambda n: True)
         c = self.cursor()
         c.execute("PRAGMA journal_mode = WAL")
+        c.execute("PRAGMA foreign_keys = ON")
 
     def create(self):
         c = self.cursor()
@@ -40,6 +44,7 @@ class DB(apsw.Connection):
         c.execute("INSERT INTO cache(url, code, headers, content) "
                   "VALUES(?, ?, ?, zeroblob(?))",
                   (url, code, headers, n))
+        c.execute("INSERT INTO cache2(url) VALUES(?)", (url, ))
 
         blob = self.blobopen("main", "cache", "content",
                              self.last_insert_rowid(), True)
@@ -65,7 +70,7 @@ class DB(apsw.Connection):
         except StopIteration:
             return
 
-        c.execute("UPDATE cache SET timestamp = DATETIME('NOW') "
+        c.execute("UPDATE cache2 SET timestamp = DATETIME('NOW') "
                   "WHERE url = ?", (url, ))
 
         blob = self.blobopen("main", "cache", "content", row[0], False)
