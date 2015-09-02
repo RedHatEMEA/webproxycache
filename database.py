@@ -32,7 +32,8 @@ class DB(apsw.Connection):
         try:
             self._persist(url, code, headers, f)
         except apsw.ConstraintError:
-            pass
+            c = self.cursor()
+            c.execute("ROLLBACK")
 
     def _persist(self, url, code, headers, f):
         f.seek(0, 2)
