@@ -171,7 +171,7 @@ class UncachedResponse(IO):
         if self.req.verb == "GET" and (re.match("^https://registry-1.docker.io:443/v2/[^/]+/[^/]+/blobs/sha256:[0-9a-z]{64}$", urlparse.urlunparse(self.req.url)) or
                                        re.match("^https://registry-1.docker.io:443/v1/images/[0-9a-z]{64}/layer$", urlparse.urlunparse(self.req.url)) or
                                        re.match("^https://registry.access.redhat.com:443/v1/images/[0-9a-z]{64}/(ancestry|json|layer)$", urlparse.urlunparse(self.req.url)) or
-                                       re.match("^https://github.com:443/[^/]+/[^/]+/archive/", urlparse.urlunparse(self.req.url)) or
+                                       re.match("^https://github.com:443/[^/]+/[^/]+/(archive|raw)/", urlparse.urlunparse(self.req.url)) or
                                        re.match("^https://rubygems.org:443/gems/", urlparse.urlunparse(self.req.url))):
             (self.http, self.code, self.other) = self.readline().split(" ", 2)
             self.code = int(self.code)
@@ -208,6 +208,7 @@ class UncachedResponse(IO):
         return self.req.verb == "GET" and \
             "Range" not in self.req.headers and \
             "Content-Range" not in self.headers and \
+            self.req.netloc() != ("auth.docker.io", 443) and \
             self.headers.get("Content-Encoding", "") in ["", "gzip"]
 
     def serve(self):
