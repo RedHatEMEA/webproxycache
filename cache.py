@@ -1,11 +1,9 @@
 #!/usr/bin/python
 
-import copy
 import database
 import errno
 import httplib
 import os
-import re
 import rfc822
 import socket
 import SocketServer
@@ -140,17 +138,6 @@ class Request(IO):
         url[0] = url[1] = None
         return urlparse.urlunparse(url)
 
-    def netloc(self):
-        if ":" in self.url.netloc:
-            (host, port) = self.url.netloc.split(":", 1)
-            return (host, int(port))
-        elif self.url.scheme == "http":
-            return (self.url.netloc, 80)
-        elif self.url.scheme == "https":
-            return (self.url.netloc, 443)
-        else:
-            raise Exception()
-
 
 class UncachedResponse(IO):
     def __init__(self, _req):
@@ -159,19 +146,44 @@ class UncachedResponse(IO):
         self.req = _req
 
         self.s = socket.socket()
-        self.s.connect(self.req.netloc())
+
         if self.req.url.scheme == "https":
+            if os.environ.get("https_proxy", ""):
+                proxy = http_netloc(urlparse.urlparse(os.environ["https_proxy"]))
+                self.s.connect(proxy)
+                self.f = self.s.makefile()
+                self.write("CONNECT %s:%u HTTP/1.1\r\n\r\n" % http_netloc(self.req.url))
+                self.flush()
+                (http, code, other) = self.readline().split(" ", 2)
+                if code != "200":
+                    raise Exception()
+                headers = rfc822.Message(self.f, False)
+
+            else:
+                self.s.connect(http_netloc(self.req.url))
+
             self.s = ssl.wrap_socket(self.s, cert_reqs=ssl.CERT_REQUIRED,
                                      ca_certs="/etc/pki/tls/certs/ca-bundle.crt")
             try:
-                ssl.match_hostname(self.s.getpeercert(), self.req.netloc()[0])
+                ssl.match_hostname(self.s.getpeercert(), http_netloc(self.req.url)[0])
             except AttributeError:
                 pass
+            self.send_http_req(self.req.path())
 
+        else:
+            if os.environ.get("http_proxy", ""):
+                proxy = http_netloc(urlparse.urlparse(os.environ["http_proxy"]))
+                self.s.connect(proxy)
+                self.send_http_req(urlparse.urlunparse(self.req.url))
+
+            else:
+                self.s.connect(http_netloc(self.req.url))
+                self.send_http_req(self.req.path())
+
+    def send_http_req(self, path):
         self.f = self.s.makefile()
 
-        self.write("%s %s %s\r\n" % (self.req.verb, self.req.path(),
-                                     self.req.http))
+        self.write("%s %s %s\r\n" % (self.req.verb, path, self.req.http))
         self.write(self.req.headers)
         self.write("\r\n")
 
@@ -184,7 +196,7 @@ class UncachedResponse(IO):
         return self.req.verb == "GET" and \
             "Range" not in self.req.headers and \
             "Content-Range" not in self.headers and \
-            self.req.netloc() != ("auth.docker.io", 443) and \
+            http_netloc(self.req.url) != ("auth.docker.io", 443) and \
             self.headers.get("Content-Encoding", "") in ["", "gzip"]
 
     def serve(self):
@@ -331,7 +343,7 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
         req = Request(f, netloc)
 
         if req.verb == "CONNECT" and netloc is None:
-            cn = req.netloc()[0]
+            cn = http_netloc(req.url)[0]
             with certlock:
                 if not os.path.exists("certs/%s.crt" % cn):
                     sslca.make_cert(cn)
@@ -343,16 +355,16 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                                            keyfile="certs/%s.key" % cn,
                                            certfile="certs/%s.crt" % cn)
 
-            return self.handle(req.netloc())
+            return self.handle(http_netloc(req.url))
 
-        if req.verb == "GET" and req.netloc() == ("rubygems.org", 443) and re.match(r"^/api/v1/dependencies\?", req.path()):
+        if req.verb == "GET" and http_netloc(req.url) == ("rubygems.org", 443) and req.path().startswith("/api/v1/dependencies?"):
             url = list(req.url)
             qs = urlparse.parse_qs(url[4])
             qs["gems"] = ",".join(sorted(qs["gems"][0].split(",")))
             url[4] = urllib.urlencode(qs)
             req.url = urlparse.ParseResult(*url)
 
-        if req.verb == "GET" and req.netloc() == ("cacert", 80):
+        if req.verb == "GET" and http_netloc(req.url) == ("cacert", 80):
             resp = LocalResponse(req, "certs/ca.crt")
         else:
             try:
@@ -367,6 +379,18 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
     allow_reuse_address = True
     daemon_threads = True
+
+
+def http_netloc(url):
+    if ":" in url.netloc:
+        (host, port) = url.netloc.split(":", 1)
+        return (host, int(port))
+    elif url.scheme == "http":
+        return (url.netloc, 80)
+    elif url.scheme == "https":
+        return (url.netloc, 443)
+    else:
+        raise Exception()
 
 
 def make_server(ip="0.0.0.0", port="8080"):
