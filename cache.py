@@ -7,7 +7,6 @@ import os
 import rfc822
 import socket
 import SocketServer
-import ssl
 import sslca
 import sys
 import tempfile
@@ -15,6 +14,11 @@ import threading
 import urllib
 import urlparse
 import zlib
+
+if sys.version_info >= (2, 7, 9):
+    import ssl
+else:
+    import backports.ssl as ssl
 
 
 certlock = threading.Lock()
@@ -162,12 +166,8 @@ class UncachedResponse(IO):
             else:
                 self.s.connect(http_netloc(self.req.url))
 
-            self.s = ssl.wrap_socket(self.s, cert_reqs=ssl.CERT_REQUIRED,
-                                     ca_certs="/etc/pki/tls/certs/ca-bundle.crt")
-            try:
-                ssl.match_hostname(self.s.getpeercert(), http_netloc(self.req.url)[0])
-            except AttributeError:
-                pass
+            clientctx = mk_clientctx()
+            self.s = clientctx.wrap_socket(self.s, server_hostname=http_netloc(self.req.url)[0])
             self.send_http_req(self.req.path())
 
         else:
@@ -351,9 +351,9 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             req.write("HTTP/1.1 200 Connection established\r\n\r\n")
             req.flush()
 
-            self.request = ssl.wrap_socket(self.request, server_side=True,
-                                           keyfile="certs/%s.key" % cn,
-                                           certfile="certs/%s.crt" % cn)
+            serverctx = mk_serverctx()
+            serverctx.load_cert_chain("certs/%s.crt" % cn, "certs/%s.key" % cn)
+            self.request = serverctx.wrap_socket(self.request, server_side=True)
 
             return self.handle(http_netloc(req.url))
 
@@ -393,10 +393,34 @@ def http_netloc(url):
         raise Exception()
 
 
+def mk_clientctx():
+    ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+    ctx.options |= OP_NO_SSLv2 | OP_NO_SSLv3 | OP_NO_COMPRESSION
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.check_hostname = True
+    ctx.load_verify_locations("/etc/pki/tls/certs/ca-bundle.crt")
+    return ctx
+
+
+def mk_serverctx():
+    ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+    ctx.options |= OP_NO_SSLv2 | OP_NO_SSLv3 | OP_NO_COMPRESSION |\
+                   OP_CIPHER_SERVER_PREFERENCE | OP_SINGLE_DH_USE |\
+                   OP_SINGLE_ECDH_USE
+    ctx.set_ciphers("ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:"
+                    "DH+AES:ECDH+HIGH:DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:"
+                    "RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:!eNULL:!MD5:!DSS:!RC4")
+    return ctx
+
+
 def make_server(ip="0.0.0.0", port="8080"):
     database.DB().create()
     return ThreadedTCPServer((ip, int(port)), ThreadedTCPRequestHandler)
 
+
+(OP_NO_SSLv2, OP_NO_SSLv3, OP_NO_COMPRESSION, OP_CIPHER_SERVER_PREFERENCE,
+ OP_SINGLE_DH_USE, OP_SINGLE_ECDH_USE) = (16777216, 33554432, 131072, 4194304,
+                                          1048576, 524288)
 
 if __name__ == "__main__":
     server = make_server(*sys.argv[1:])
