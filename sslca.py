@@ -2,6 +2,7 @@
 
 import OpenSSL.crypto
 import os
+import random
 
 
 def sn():
@@ -21,7 +22,7 @@ def make_ca_cert():
     cert = OpenSSL.crypto.X509()
     cert.set_version(2)
     cert.set_serial_number(sn())
-    cert.get_subject().CN = "Webcache CA"
+    cert.get_subject().CN = "Webcache CA " + "".join(random.choice("0123456789ABCDEF") for i in range(8))
     cert.gmtime_adj_notBefore(-60 * 60)
     cert.gmtime_adj_notAfter((365 * 24 - 1) * 60 * 60)
     cert.set_issuer(cert.get_subject())
