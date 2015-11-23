@@ -231,7 +231,8 @@ class UncachedResponse(IO):
         else:
             self.log("MISS", self.code, urlparse.urlunparse(self.req.url))
 
-            self.copybody(self.req)
+            if self.req.verb != "HEAD":
+                self.copybody(self.req)
 
         self.req.flush()
         self.f.close()
