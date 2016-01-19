@@ -4,6 +4,7 @@ import database
 import errno
 import httplib
 import os
+import re
 import rfc822
 import socket
 import SocketServer
@@ -21,6 +22,7 @@ else:
     import backports.ssl as ssl
 
 
+blacklist = []
 certlock = threading.Lock()
 tls = threading.local()
 
@@ -197,7 +199,8 @@ class UncachedResponse(IO):
             "Range" not in self.req.headers and \
             "Content-Range" not in self.headers and \
             http_netloc(self.req.url) != ("auth.docker.io", 443) and \
-            self.headers.get("Content-Encoding", "") in ["", "gzip"]
+            self.headers.get("Content-Encoding", "") in ["", "gzip"] and \
+            all([rx.match(urlparse.urlunparse(self.req.url)) is None for rx in blacklist])
 
     def serve(self):
         (self.http, self.code, self.other) = self.readline().split(" ", 2)
@@ -414,7 +417,21 @@ def mk_serverctx():
     return ctx
 
 
+def read_blacklist():
+    global blacklist
+    blacklist = []
+
+    try:
+        with open("blacklist") as f:
+            for line in f:
+                blacklist.append(re.compile(line.strip()))
+
+    except IOError:
+        pass
+
+
 def make_server(ip="0.0.0.0", port="8080"):
+    read_blacklist()
     database.DB().create()
     return ThreadedTCPServer((ip, int(port)), ThreadedTCPRequestHandler)
 
