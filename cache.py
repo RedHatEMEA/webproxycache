@@ -23,7 +23,6 @@ else:
 
 certlock = threading.Lock()
 tls = threading.local()
-dbpath = "webproxycache.db"
 
 
 class EOFException(Exception):
@@ -321,7 +320,7 @@ class LocalResponse(IO):
 
 class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
     def handle(self, netloc=None):
-        tls.db = database.DB(dbpath)
+        tls.db = database.DB()
 
         try:
             self._handle(netloc)
@@ -415,10 +414,8 @@ def mk_serverctx():
     return ctx
 
 
-def make_server(ip="0.0.0.0", port="8080", _dbpath=dbpath):
-    global dbpath
-    dbpath = _dbpath
-    database.DB(dbpath).create()
+def make_server(ip="0.0.0.0", port="8080"):
+    database.DB().create()
     return ThreadedTCPServer((ip, int(port)), ThreadedTCPRequestHandler)
 
 

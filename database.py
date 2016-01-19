@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS cache2(
 """
 
 class DB(apsw.Connection):
-    def __init__(self, filename):
-        super(DB, self).__init__(filename)
+    def __init__(self):
+        super(DB, self).__init__("webproxycache.db")
         self.setbusyhandler(lambda n: True)
         c = self.cursor()
         c.execute("PRAGMA journal_mode = WAL")
