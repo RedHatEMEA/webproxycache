@@ -45,10 +45,10 @@ class DB(apsw.Connection):
         c.execute("INSERT INTO cache(url, code, headers, content) "
                   "VALUES(?, ?, ?, zeroblob(?))",
                   (url, code, headers, n))
+        cache_rowid = self.last_insert_rowid()
         c.execute("INSERT INTO cache2(url) VALUES(?)", (url, ))
 
-        blob = self.blobopen("main", "cache", "content",
-                             self.last_insert_rowid(), True)
+        blob = self.blobopen("main", "cache", "content", cache_rowid, True)
 
         while n > 0:
             data = f.read(min(n, 4096))
