@@ -200,7 +200,7 @@ class UncachedResponse(IO):
             "Content-Range" not in self.headers and \
             http_netloc(self.req.url) != ("auth.docker.io", 443) and \
             self.headers.get("Content-Encoding", "") in ["", "gzip"] and \
-            all([rx.match(urlparse.urlunparse(self.req.url)) is None for rx in blacklist])
+            all([rx.search(urlparse.urlunparse(self.req.url)) is None for rx in blacklist])
 
     def serve(self):
         (self.http, self.code, self.other) = self.readline().split(" ", 2)
