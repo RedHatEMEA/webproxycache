@@ -21,6 +21,19 @@ if sys.version_info >= (2, 7, 9):
 else:
     import backports.ssl as ssl
 
+    # https://github.com/alekstorm/backports.ssl/issues/18
+
+    old_safe_ssl_call = ssl.core._safe_ssl_call
+
+    def new_safe_ssl_call(suppress_ragged_eofs, sock, call, *args, **kwargs):
+        try:
+            return old_safe_ssl_call(suppress_ragged_eofs, sock, call, *args, **kwargs)
+        except ssl.core.SSLZeroReturnError:
+            if call == "recv":
+                return ""
+            raise
+
+    ssl.core._safe_ssl_call = new_safe_ssl_call
 
 blacklist = []
 certlock = threading.Lock()
