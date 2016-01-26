@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python -u
 
 import database
 import errno
@@ -358,6 +358,8 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
 
     def __handle(self, f, netloc):
         req = Request(f, netloc)
+        with certlock:
+            print >>sys.stderr, "          " + " ".join([req.verb, urlparse.urlunparse(req.url), req.http])
 
         if req.verb == "CONNECT" and netloc is None:
             cn = http_netloc(req.url)[0]
