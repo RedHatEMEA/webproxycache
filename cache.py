@@ -208,7 +208,8 @@ class UncachedResponse(IO):
         self.flush()
 
     def cacheable(self):
-        return self.req.verb == "GET" and \
+        return self.req.verb in ["GET", "HEAD"] and \
+            self.code in [200, 301, 302, 307, 404] and \
             "Range" not in self.req.headers and \
             "Content-Range" not in self.headers and \
             http_netloc(self.req.url) != ("auth.docker.io", 443) and \
@@ -229,18 +230,16 @@ class UncachedResponse(IO):
         self.req.write(self.headers)
         self.req.write("\r\n")
 
-        if self.cacheable() and self.code == 200:
+        if self.cacheable():
             self.log("SAVE", self.code, urlparse.urlunparse(self.req.url))
 
             cw = CacheWriter(self.req, self)
-            self.copybody(self.req, cw)
-            cw.persist()
 
-        elif self.cacheable() and self.code in [301, 302, 307, 404]:
-            self.log("SAVE", self.code, urlparse.urlunparse(self.req.url))
+            if self.req.verb == "GET" and self.code == 200:
+                self.copybody(self.req, cw)
+            else:
+                self.copybody(self.req)
 
-            cw = CacheWriter(self.req, self)
-            self.copybody(self.req)
             cw.persist()
 
         else:
@@ -273,12 +272,18 @@ class CacheWriter(IO):
         extraheaders = []
         for k in hl:
             v = self.resp.headers.get(k, None)
-            if v:
+            if v is not None:
                 extraheaders.append("%s: %s" % (k, v))
         extraheaders = "\r\n".join(extraheaders)
 
-        tls.db.persist(urlparse.urlunparse(self.req.url), self.resp.code,
-                       extraheaders, self.f)
+        if self.req.verb == "HEAD":
+            tls.db.persist_null(urlparse.urlunparse(self.req.url),
+                                self.resp.code, extraheaders,
+                                int(self.resp.headers.get("Content-Length")))
+        else:
+            tls.db.persist(urlparse.urlunparse(self.req.url), self.resp.code,
+                           extraheaders, self.f)
+
         self.f.close()
 
 
@@ -288,10 +293,15 @@ class CachedResponse(IO):
 
         self.req = _req
 
-        if self.req.verb != "GET" or self.req.headers.get("Range"):
+        if self.req.verb not in ["GET", "HEAD"] or \
+           self.req.headers.get("Range"):
             raise NotInCacheException()
 
-        rv = tls.db.serve(urlparse.urlunparse(self.req.url))
+        if self.req.verb == "GET":
+            rv = tls.db.serve(urlparse.urlunparse(self.req.url))
+        else:
+            rv = tls.db.serve_null(urlparse.urlunparse(self.req.url))
+
         if rv is None:
             raise NotInCacheException()
 
@@ -308,7 +318,9 @@ class CachedResponse(IO):
             self.req.write(self.extraheaders + "\r\n")
         self.req.write("Connection: keep-alive\r\n")
         self.req.write("\r\n")
-        self.copylength(self.req, self.length)
+
+        if self.req.verb != "HEAD":
+            self.copylength(self.req, self.length)
 
         self.req.flush()
 
