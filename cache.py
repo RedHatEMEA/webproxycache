@@ -246,6 +246,8 @@ class UncachedResponse(IO):
                 self.copybody(self.req, cw)
             elif self.req.verb != "HEAD":
                 self.copybody(self.req)
+            else:
+                self.req.flush()
 
             cw.persist()
 
@@ -254,6 +256,8 @@ class UncachedResponse(IO):
 
             if self.req.verb != "HEAD":
                 self.copybody(self.req)
+            else:
+                self.req.flush()
 
         self.f.close()
         self.s.close()
