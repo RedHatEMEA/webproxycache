@@ -211,6 +211,8 @@ class UncachedResponse(IO):
 
         if self.req.verb not in ["GET", "HEAD"]:
             self.req.copybody(self)
+        else:
+            self.flush()
 
     def cacheable(self):
         return self.req.verb in ["GET", "HEAD"] and \
