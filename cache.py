@@ -374,16 +374,10 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             print >>sys.stderr, "          " + " ".join([req.verb, urlparse.urlunparse(req.url), req.http])
 
         if req.verb == "CONNECT" and netloc is None:
-            cn = http_netloc(req.url)[0]
-            with certlock:
-                if not os.path.exists("certs/%s.crt" % cn):
-                    sslca.make_cert(cn)
-
             req.write("HTTP/1.1 200 Connection established\r\n\r\n")
             req.flush()
 
-            serverctx = mk_serverctx()
-            serverctx.load_cert_chain("certs/%s.crt" % cn, "certs/%s.key" % cn)
+            serverctx = mk_serverctx(http_netloc(req.url)[0])
             self.request = serverctx.wrap_socket(self.request, server_side=True)
 
             return self.handle(http_netloc(req.url))
@@ -433,7 +427,7 @@ def mk_clientctx():
     return ctx
 
 
-def mk_serverctx():
+def mk_serverctx(cn):
     ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
     ctx.options |= OP_NO_SSLv2 | OP_NO_SSLv3 | OP_NO_COMPRESSION |\
                    OP_CIPHER_SERVER_PREFERENCE | OP_SINGLE_DH_USE |\
@@ -441,6 +435,12 @@ def mk_serverctx():
     ctx.set_ciphers("ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:"
                     "DH+AES:ECDH+HIGH:DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:"
                     "RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:!eNULL:!MD5:!DSS:!RC4")
+
+    with certlock:
+        if not os.path.exists("certs/%s.crt" % cn):
+            sslca.make_cert(cn)
+
+    ctx.load_cert_chain("certs/%s.crt" % cn, "certs/%s.key" % cn)
     return ctx
 
 
