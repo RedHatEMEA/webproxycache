@@ -42,7 +42,7 @@ class DB(apsw.Connection):
         f.seek(0)
 
         c = self.cursor()
-        c.execute("BEGIN")
+        c.execute("BEGIN IMMEDIATE")
         try:
             if not list(c.execute("SELECT rowid from cache WHERE url = ? "
                                   "AND content IS NOT NULL", (url, ))):
@@ -75,7 +75,7 @@ class DB(apsw.Connection):
 
     def persist_null(self, url, code, headers, n):
         c = self.cursor()
-        c.execute("BEGIN")
+        c.execute("BEGIN IMMEDIATE")
         try:
             if not list(c.execute("SELECT rowid from cache WHERE url = ?",
                                   (url, ))):
