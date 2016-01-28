@@ -35,6 +35,12 @@ else:
 
     ssl.core._safe_ssl_call = new_safe_ssl_call
 
+old_excepthook = sys.excepthook
+def new_excepthook(exctype, value, traceback):
+    with certlock:
+        return old_excepthook(exctype, value, traceback)
+sys.excepthook = new_excepthook
+
 blacklist = []
 certlock = threading.Lock()
 tls = threading.local()
@@ -358,12 +364,14 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
         except EOFException:
             pass
         except socket.gaierror as e:
-            print >>sys.stderr, e
+            with certlock:
+                print >>sys.stderr, e
         except IOError as e:
             if e.errno != errno.EPIPE:
                 raise
         except ssl.SSLError as e:
-            print >>sys.stderr, e
+            with certlock:
+                print >>sys.stderr, e
 
     def _handle(self, f, netloc):
         req = Request(f, netloc)
