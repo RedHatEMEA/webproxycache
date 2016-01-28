@@ -439,8 +439,7 @@ def mk_serverctx(cn):
                     "RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:!eNULL:!MD5:!DSS:!RC4")
 
     with certlock:
-        if not os.path.exists("certs/%s.crt" % cn):
-            sslca.make_cert(cn)
+        CA.get_key_cert(cn)
 
     ctx.load_cert_chain("certs/%s.crt" % cn, "certs/%s.key" % cn)
     return ctx
@@ -471,5 +470,6 @@ def make_server(ip="0.0.0.0", port="8080"):
 
 if __name__ == "__main__":
     server = make_server(*sys.argv[1:])
+    CA = sslca.CA()
     print >>sys.stderr, "Listening on %s:%s..." % server.server_address
     server.serve_forever()
