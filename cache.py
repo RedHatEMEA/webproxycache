@@ -244,7 +244,7 @@ class UncachedResponse(IO):
 
             if self.req.verb == "GET" and self.code == 200:
                 self.copybody(self.req, cw)
-            else:
+            elif self.req.verb != "HEAD":
                 self.copybody(self.req)
 
             cw.persist()
