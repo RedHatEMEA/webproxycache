@@ -141,6 +141,7 @@ class IO(object):
         else:
             self.copyall(dst, extra)
 
+        dst.flush()
 
 class Request(IO):
     def __init__(self, _f, netloc=None):
@@ -211,8 +212,6 @@ class UncachedResponse(IO):
         if self.req.verb not in ["GET", "HEAD"]:
             self.req.copybody(self)
 
-        self.flush()
-
     def cacheable(self):
         return self.req.verb in ["GET", "HEAD"] and \
             self.code in [200, 301, 302, 307, 404] and \
@@ -254,7 +253,6 @@ class UncachedResponse(IO):
             if self.req.verb != "HEAD":
                 self.copybody(self.req)
 
-        self.req.flush()
         self.f.close()
         self.s.close()
 
