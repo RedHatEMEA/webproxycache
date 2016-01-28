@@ -390,15 +390,12 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             req.url = urlparse.ParseResult(*url)
 
         if req.verb == "GET" and http_netloc(req.url) == ("cacert", 80):
-            resp = LocalResponse(req, "certs/ca.crt")
-        else:
-            try:
-                resp = CachedResponse(req)
+            return LocalResponse(req, "certs/ca.crt").serve()
 
-            except NotInCacheException:
-                resp = UncachedResponse(req)
-
-        return resp.serve()
+        try:
+            return CachedResponse(req).serve()
+        except NotInCacheException:
+            return UncachedResponse(req).serve()
 
 
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
