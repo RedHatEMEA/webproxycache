@@ -351,7 +351,10 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
         tls.db = database.DB()
 
         try:
-            self._handle(netloc)
+            f = self.request.makefile()
+            while self._handle(f, netloc):
+                pass
+            f.close()
         except EOFException:
             pass
         except socket.gaierror as e:
@@ -362,13 +365,7 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
         except ssl.SSLError as e:
             print >>sys.stderr, e
 
-    def _handle(self, netloc=None):
-        f = self.request.makefile()
-        while self.__handle(f, netloc):
-            pass
-        f.close()
-
-    def __handle(self, f, netloc):
+    def _handle(self, f, netloc):
         req = Request(f, netloc)
         with certlock:
             print >>sys.stderr, "          " + " ".join([req.verb, urlparse.urlunparse(req.url), req.http])
