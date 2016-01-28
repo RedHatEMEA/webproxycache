@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import apsw
+import time
 
 create_sql = """
 CREATE TABLE IF NOT EXISTS cache(
@@ -19,15 +20,20 @@ CREATE TABLE IF NOT EXISTS cache2(
 class DB(apsw.Connection):
     def __init__(self):
         super(DB, self).__init__("webproxycache.db")
-        self.setbusyhandler(lambda n: True)
+        self.setbusyhandler(self.busyhandler)
         c = self.cursor()
-        c.execute("PRAGMA page_size = 4096")
-        c.execute("PRAGMA journal_mode = WAL")
         c.execute("PRAGMA foreign_keys = ON")
+
+    @staticmethod
+    def busyhandler(n):
+        time.sleep(0.1)
+        return True
 
     def create(self):
         c = self.cursor()
         c.execute("PRAGMA auto_vacuum = FULL")
+        c.execute("PRAGMA journal_mode = WAL")
+        c.execute("PRAGMA page_size = 4096")
         c.execute(create_sql)
 
     def persist(self, url, code, headers, f):
