@@ -472,8 +472,9 @@ def make_server(ip="0.0.0.0", port="8080"):
  OP_SINGLE_DH_USE, OP_SINGLE_ECDH_USE) = (16777216, 33554432, 131072, 4194304,
                                           1048576, 524288)
 
+CA = sslca.CA()
+
 if __name__ == "__main__":
     server = make_server(*sys.argv[1:])
-    CA = sslca.CA()
     print >>sys.stderr, "Listening on %s:%s..." % server.server_address
     server.serve_forever()
